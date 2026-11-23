@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Anggota {
+  id               String         @id @default(uuid())
+  noAnggota        String         @unique
+  namaLengkap      String
+  noKtp            String         @unique
+  alamat           String
+  resort           String         @default("Resort 1") // <-- Fitur Kelompok Resort
+  statusAnggota    String         @default("Aktif")    // <-- Fitur Keluarkan Nasabah
+  tglBergabung     DateTime       @default(now())
+  simpananPokok    Float          @default(10000)
+  simpananWajib    Float          @default(5000)
+  simpananSukarela Float          @default(0)
+  statusPinjaman   String         @default("Tidak Ada")
+  bukuTabungan     BukuTabungan[]
+  pinjaman         Pinjaman[]
+}
+
+model BukuTabungan {
+  id         String   @id @default(uuid())
+  anggotaId  String
+  anggota    Anggota  @relation(fields: [anggotaId], references: [id], onDelete: Cascade)
+  tgl        DateTime @default(now())
+  sandi      String
+  debet      Float    @default(0)
+  kredit     Float    @default(0)
+  saldo      Float    @default(0)
+  keterangan String
+}
+
+model Pinjaman {
+  id                     String               @id @default(uuid())
+  anggotaId              String
+  anggota                Anggota              @relation(fields: [anggotaId], references: [id], onDelete: Cascade)
+  jumlahPinjaman         Float                // Pokok Pinjaman Awal
+  tenorBulan             Int                  // 3, 5, 8, 10, 12, 15, 24 bulan
+  bungaPersen            Float                // 2.5% atau 2%
+  setoranSimpanan2Persen Float                // 2% diambil dari saldo simpanan
+  sisaPinjaman           Float                // Sisa Pokok Hutang (Bunga Putus)
+  jasaTerbayar           Float                @default(0) // Total Jasa yang sudah dibayarkan
+  tglPencairan           DateTime             @default(now())
+  status                 String               @default("Aktif")
+  riwayatAngsuran        PembayaranAngsuran[]
+}
+
+model PembayaranAngsuran {
+  id           String   @id @default(uuid())
+  pinjamanId   String
+  pinjaman     Pinjaman @relation(fields: [pinjamanId], references: [id], onDelete: Cascade)
+  tglBayar     DateTime @default(now())
+  bayarPokok   Float    @default(0)
+  bayarJasa    Float    @default(0)
+  sisaPokok    Float    @default(0)
+  keterangan   String?
+}
