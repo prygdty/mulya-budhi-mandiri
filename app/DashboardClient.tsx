@@ -10,6 +10,8 @@ import {
   bayarAngsuran,
   ubahStatusAnggota,
   hapusAnggotaPermanen,
+  hapusRiwayatPinjaman, // <--- FUNGSI BARU (Tambahkan di actions.ts nanti)
+  hapusRiwayatSimpanan  // <--- FUNGSI BARU (Tambahkan di actions.ts nanti)
 } from './actions'
 import { hitungPinjaman, OPSI_TENOR_PINJAMAN } from '@/lib/kalkulator'
 import {
@@ -37,6 +39,7 @@ import {
   RotateCcw,
   LogOut,
   Lock,
+  Search, // <--- IKON PENCARIAN BARU
 } from 'lucide-react'
 
 function parseRincianSimpanan(row: any) {
@@ -81,11 +84,24 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
     'RINGKASAN' | 'ANGGOTA' | 'PINJAMAN' | 'BUKU_TABUNGAN' | 'TABEL_JASA_05' | 'INPUT_TRANSAKSI'
   >('RINGKASAN')
 
-  // Logika Filter Anggota (Soft Delete)
+  // Logika Filter Anggota (Soft Delete) & FITUR PENCARIAN (SEARCH)
   const [tampilkanAnggota, setTampilkanAnggota] = useState<'Aktif' | 'Keluar'>('Aktif')
+  const [searchQuery, setSearchQuery] = useState('') // <--- STATE PENCARIAN BARU
+
   const daftarAnggotaAktif = initialAnggota.filter((a) => a.statusAnggota !== 'Keluar')
   const daftarAnggotaKeluar = initialAnggota.filter((a) => a.statusAnggota === 'Keluar')
-  const anggotaYgDitampilkan = tampilkanAnggota === 'Aktif' ? daftarAnggotaAktif : daftarAnggotaKeluar
+  
+  let anggotaYgDitampilkan = tampilkanAnggota === 'Aktif' ? daftarAnggotaAktif : daftarAnggotaKeluar
+
+  // FILTER PENCARIAN ANGGOTA
+  if (searchQuery.trim() !== '') {
+    const query = searchQuery.toLowerCase()
+    anggotaYgDitampilkan = anggotaYgDitampilkan.filter(a => 
+      a.namaLengkap.toLowerCase().includes(query) || 
+      a.noAnggota.toLowerCase().includes(query) ||
+      a.noKtp.toLowerCase().includes(query)
+    )
+  }
 
   // Logika Kelompok Resort
   const resortUnikDariDB = Array.from(new Set(initialAnggota.map((a) => a.resort).filter(Boolean)))
@@ -582,7 +598,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     if (res?.error) {
                       alert(res.error);
                     } else {
-                      alert("Sukses! Nasabah berhasil didaftarkan.");
+                      alert("Sukses! Anggota berhasil didaftarkan.");
                     }
                   }} 
                   className="grid grid-cols-1 md:grid-cols-6 gap-4"
@@ -626,7 +642,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
             <div className="flex flex-wrap justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <div className="flex items-center gap-4">
-                <h3 className="font-bold text-slate-800">Tabel Nasabah & Simpanan</h3>
+                <h3 className="font-bold text-slate-800">Tabel Anggota & Simpanan</h3>
                 
                 {/* TOGGLE AKTIF / KELUAR */}
                 <div className="flex bg-slate-100 p-1 rounded-lg">
@@ -634,22 +650,37 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     onClick={() => setTampilkanAnggota('Aktif')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition ${tampilkanAnggota === 'Aktif' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
                   >
-                    Nasabah Aktif ({daftarAnggotaAktif.length})
+                    Anggota Aktif ({daftarAnggotaAktif.length})
                   </button>
                   <button 
                     onClick={() => setTampilkanAnggota('Keluar')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition ${tampilkanAnggota === 'Keluar' ? 'bg-red-50 text-red-700 shadow-sm' : 'text-slate-500'}`}
                   >
-                    Nasabah Keluar ({daftarAnggotaKeluar.length})
+                    Anggota Keluar ({daftarAnggotaKeluar.length})
                   </button>
                 </div>
               </div>
-              <button
-                onClick={exportSemuaAnggotaCSV}
-                className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow"
-              >
-                <FileSpreadsheet className="w-4 h-4" /> Unduh CSV Tabel
-              </button>
+              <div className="flex items-center gap-3">
+                {/* KOLOM PENCARIAN ANGGOTA (BARU) */}
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Cari Nama / No Anggota..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <button
+                  onClick={exportSemuaAnggotaCSV}
+                  className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow"
+                >
+                  <FileSpreadsheet className="w-4 h-4" /> Unduh CSV Tabel
+                </button>
+              </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
@@ -668,7 +699,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                 <tbody className="divide-y divide-slate-200">
                   {anggotaYgDitampilkan.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">Belum ada nasabah di kategori ini.</td>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">Belum ada anggota di kategori / pencarian ini.</td>
                     </tr>
                   ) : (
                     anggotaYgDitampilkan.map((a) => {
@@ -723,9 +754,9 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                                         className="w-full inline-flex justify-center items-center gap-1 bg-red-100 hover:bg-red-200 text-red-800 px-2 py-1 rounded text-xs font-semibold"
                                         onClick={(e) => {
                                           if(sisaPokokPinjaman > 0) {
-                                            if(!confirm(`PERINGATAN! Nasabah ini masih memiliki hutang Rp ${sisaPokokPinjaman.toLocaleString('id-ID')}. Tetap keluarkan?`)) e.preventDefault();
+                                            if(!confirm(`PERINGATAN! Anggota ini masih memiliki hutang Rp ${sisaPokokPinjaman.toLocaleString('id-ID')}. Tetap keluarkan?`)) e.preventDefault();
                                           } else {
-                                            if(!confirm('Keluarkan nasabah ini dari daftar aktif? (Riwayat tabungan tetap aman)')) e.preventDefault();
+                                            if(!confirm('Keluarkan anggota ini dari daftar aktif? (Riwayat tabungan tetap aman)')) e.preventDefault();
                                           }
                                         }}
                                       >
@@ -888,17 +919,37 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     <th className="py-3 px-4 text-center">Tenor & Jasa</th>
                     <th className="py-3 px-4 text-right text-amber-800">Sisa Pokok</th>
                     <th className="py-3 px-4 text-center">Kartu Angsuran</th>
+                    {role === 'ADMIN' && <th className="py-3 px-4 text-center text-red-600">Hapus Pinjaman</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {semuaPinjaman.map((p: any) => (
-                    <tr key={p.id} onClick={() => setKartuPinjamanModal(p)} className={`cursor-pointer transition ${p.status === 'Lunas' ? 'bg-slate-50 opacity-75' : 'hover:bg-emerald-50'}`}>
-                      <td className="py-3 px-4 font-mono text-xs">{new Date(p.tglPencairan).toLocaleDateString('id-ID')}</td>
-                      <td className="py-3 px-4 font-bold text-emerald-900">{p.noAnggota} - {p.namaAnggota}</td>
-                      <td className="py-3 px-4 text-right">Rp {p.jumlahPinjaman.toLocaleString('id-ID')}</td>
-                      <td className="py-3 px-4 text-center">{p.tenorBulan} Bln ({p.bungaPersen}%)</td>
-                      <td className="py-3 px-4 text-right font-bold text-amber-700">{p.status === 'Lunas' ? 'LUNAS' : `Rp ${p.sisaPinjaman.toLocaleString('id-ID')}`}</td>
+                    <tr key={p.id} className={`transition ${p.status === 'Lunas' ? 'bg-slate-50 opacity-75' : 'hover:bg-emerald-50'}`}>
+                      <td className="py-3 px-4 font-mono text-xs cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{new Date(p.tglPencairan).toLocaleDateString('id-ID')}</td>
+                      <td className="py-3 px-4 font-bold text-emerald-900 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.noAnggota} - {p.namaAnggota}</td>
+                      <td className="py-3 px-4 text-right cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>Rp {p.jumlahPinjaman.toLocaleString('id-ID')}</td>
+                      <td className="py-3 px-4 text-center cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.tenorBulan} Bln ({p.bungaPersen}%)</td>
+                      <td className="py-3 px-4 text-right font-bold text-amber-700 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.status === 'Lunas' ? 'LUNAS' : `Rp ${p.sisaPinjaman.toLocaleString('id-ID')}`}</td>
                       <td className="py-3 px-4 text-center"><button onClick={() => setKartuPinjamanModal(p)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-semibold">Buka Kartu</button></td>
+                      {/* TOMBOL HAPUS PINJAMAN PERMANEN */}
+                      {role === 'ADMIN' && (
+                        <td className="py-3 px-4 text-center">
+                          <form action={hapusRiwayatPinjaman}>
+                            <input type="hidden" name="pinjamanId" value={p.id} />
+                            <button 
+                              type="submit" 
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition"
+                              onClick={(e) => {
+                                if(!confirm(`HAPUS PINJAMAN INI?\nData pokok hutang dan seluruh riwayat pembayaran angsuran untuk pinjaman ini akan dihapus permanen.\n(Sisa Hutang: Rp ${p.sisaPinjaman.toLocaleString('id-ID')})\nLanjutkan?`)) {
+                                  e.preventDefault();
+                                }
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </form>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -945,9 +996,9 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
         {activeTab === 'BUKU_TABUNGAN' && (
           <div className="space-y-6">
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap justify-between items-center gap-4 print:hidden">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 w-full md:w-auto">
                 <label className="text-sm font-semibold text-slate-700">Pilih Anggota:</label>
-                <select value={selectedAnggotaId} onChange={(e) => setSelectedAnggotaId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                <select value={selectedAnggotaId} onChange={(e) => setSelectedAnggotaId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full md:w-64">
                   <option value="">-- Pilih Anggota --</option>
                   {initialAnggota.map((a) => (
                     <option key={a.id} value={a.id}>{a.noAnggota} - {a.namaLengkap}</option>
@@ -992,13 +1043,15 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                       <th colSpan={4} className="border border-slate-800 py-1 px-2 text-center tracking-widest">S I M P A N A N</th>
                       <th rowSpan={2} className="border border-slate-800 py-2 px-2 text-center w-28">JUMLAH<br />SIMPANAN</th>
                       <th rowSpan={2} className="border border-slate-800 py-2 px-2 text-center w-24">Keterangan<br /><span className="text-[10px] font-normal">paraf Petugas</span></th>
-                      <th rowSpan={2} className="border border-slate-800 py-2 px-2 text-center w-28 print:hidden">Cetak<br />Kuitansi</th>
+                      <th colSpan={2} className="border border-slate-800 py-2 px-2 text-center print:hidden">Aksi</th>
                     </tr>
                     <tr className="bg-slate-50 text-slate-900">
                       <th className="border border-slate-800 py-1 px-2 text-center w-20">Pokok</th>
                       <th className="border border-slate-800 py-1 px-2 text-center w-20">Wajib</th>
                       <th className="border border-slate-800 py-1 px-2 text-center w-24">Sukarela</th>
                       <th className="border border-slate-800 py-1 px-2 text-center w-20">Lain-lain</th>
+                      <th className="border border-slate-800 py-1 px-1 text-center w-12 print:hidden bg-slate-100">Kuitansi</th>
+                      {role === 'ADMIN' && <th className="border border-slate-800 py-1 px-1 text-center w-12 print:hidden text-red-600 bg-red-50">Hapus</th>}
                     </tr>
                   </thead>
                   <tbody className="font-mono text-[11px]">
@@ -1014,7 +1067,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                       }
 
                       return (
-                        <tr key={row.id} className="border-b border-slate-400">
+                        <tr key={row.id} className="border-b border-slate-400 hover:bg-slate-50">
                           <td className="border-x border-slate-800 py-1.5 px-2 text-center">{new Date(row.tgl).toLocaleDateString('id-ID')}</td>
                           <td className="border-x border-slate-800 py-1.5 px-2 text-center">{noBukti}</td>
                           <td className="border-x border-slate-800 py-1.5 px-2 font-sans">{r.uraian}</td>
@@ -1025,12 +1078,42 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                           <td className="border-x border-slate-800 py-1.5 px-2 text-right">{r.lain > 0 ? r.lain.toLocaleString('id-ID') : '-'}</td>
                           <td className="border-x border-slate-800 py-1.5 px-2 text-right font-bold">{row.saldo.toLocaleString('id-ID')}</td>
                           <td className="border-x border-slate-800 py-1.5 px-2 text-center font-sans text-[10px] text-slate-500">Paraf</td>
-                          <td className="border-x border-slate-800 py-1.5 px-2 text-center print:hidden font-sans">
+                          
+                          <td className="border-x border-slate-800 py-1.5 px-1 text-center print:hidden font-sans">
                             <button
                               onClick={() => setKuitansiModal({ noKuitansi: noBukti, tanggal: new Date(row.tgl).toLocaleDateString('id-ID'), namaAnggota: anggotaTerpilih.namaLengkap, noAnggota: anggotaTerpilih.noAnggota, jenisTransaksi: row.sandi === 'ANGSURAN' ? 'PEMBAYARAN ANGSURAN PINJAMAN' : isPengurangan ? 'PENGAMBILAN / PENARIKAN SIMPANAN' : 'SETORAN SIMPANAN ANGGOTA', nominal: nominalKuitansi, keterangan: row.keterangan })}
-                              className="inline-flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-semibold"
-                            ><Receipt className="w-3 h-3" /> Kuitansi</button>
+                              className="inline-flex justify-center items-center bg-emerald-100 hover:bg-emerald-200 text-emerald-800 p-1.5 rounded transition"
+                              title="Cetak Kuitansi"
+                            ><Receipt className="w-3.5 h-3.5" /></button>
                           </td>
+
+                          {/* TOMBOL HAPUS RIWAYAT TABUNGAN */}
+                          {role === 'ADMIN' && (
+                            <td className="border-x border-slate-800 py-1.5 px-1 text-center print:hidden font-sans">
+                              <form action={hapusRiwayatSimpanan}>
+                                <input type="hidden" name="bukuTabunganId" value={row.id} />
+                                <input type="hidden" name="anggotaId" value={anggotaTerpilih.id} />
+                                <button 
+                                  type="submit" 
+                                  className="inline-flex justify-center items-center bg-red-50 hover:bg-red-200 text-red-600 p-1.5 rounded transition"
+                                  title="Hapus Riwayat Ini"
+                                  onClick={(e) => {
+                                    if(idx === 0 && row.keterangan?.includes('Setoran Awal')) {
+                                      alert('Setoran Awal tidak dapat dihapus. Jika ingin menghapus anggota, gunakan tombol "Hapus Permanen" di tab Anggota.');
+                                      e.preventDefault();
+                                      return;
+                                    }
+                                    if(!confirm(`Hapus mutasi simpanan: "${r.uraian}" ?\nPerhatian: Menghapus baris ini akan merubah saldo tabungan anggota ini (Saldo akan dihitung ulang otomatis).`)) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </form>
+                            </td>
+                          )}
+
                         </tr>
                       )
                     })}

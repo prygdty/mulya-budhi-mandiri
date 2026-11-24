@@ -361,3 +361,105 @@ export async function hapusAnggotaPermanen(formData: FormData) {
 
   revalidatePath('/')
 }
+
+
+// =========================================================================
+// FUNGSI BARU: MENGHAPUS RIWAYAT PINJAMAN SECARA PERMANEN
+// =========================================================================
+export async function hapusRiwayatPinjaman(formData: FormData) {
+  const pinjamanId = formData.get('pinjamanId') as string
+
+  // Karena di schema.prisma kita sudah menyetel 'onDelete: Cascade' 
+  // pada model PembayaranAngsuran, menghapus Pinjaman ini akan otomatis 
+  // menghapus SELURUH riwayat angsuran yang menempel padanya.
+  await prisma.pinjaman.delete({
+    where: { id: pinjamanId },
+  })
+
+  revalidatePath('/')
+}
+
+// =========================================================================
+// FUNGSI BARU: MENGHAPUS SATU BARIS MUTASI BUKU SIMPANAN & MENGHITUNG ULANG
+// =========================================================================
+export async function hapusRiwayatSimpanan(formData: FormData) {
+  const bukuTabunganId = formData.get('bukuTabunganId') as string
+  const anggotaId = formData.get('anggotaId') as string
+
+  // 1. Ambil data mutasi yang mau dihapus untuk tahu isinya
+  const mutasiYgDihapus = await prisma.bukuTabungan.findUnique({
+    where: { id: bukuTabunganId }
+  })
+  
+  if (!mutasiYgDihapus) return;
+
+  // 2. Hapus baris mutasi tersebut dari database
+  await prisma.bukuTabungan.delete({
+    where: { id: bukuTabunganId },
+  })
+
+  // 3. Kita harus menghitung ulang saldo tabungan anggota ini (Pokok, Wajib, Sukarela, Lain)
+  // karena kalau dihapus manual tanpa perhitungan ulang, saldo akhirnya akan jadi kacau.
+  const semuaMutasi = await prisma.bukuTabungan.findMany({
+    where: { anggotaId: anggotaId },
+    orderBy: { tgl: 'asc' }, // Urutkan dari yang paling lama
+  })
+
+  let totalPokok = 0
+  let totalWajib = 0
+  let totalSukarela = 0
+
+  // Logika membaca history keterangan untuk menyusun ulang saldo 
+  // yang sebenarnya (Sesuai dengan logika parseRincianSimpanan)
+  for (let i = 0; i < semuaMutasi.length; i++) {
+    const row = semuaMutasi[i]
+    const match = row.keterangan?.match(/\(Pokok:(\d+)\|Wajib:(\d+)\|Sukarela:(\d+)\|Lain:(\d+)\)/)
+    
+    let curPokok = 0, curWajib = 0, curSukarela = 0
+
+    if (match) {
+      curPokok = Number(match[1])
+      curWajib = Number(match[2])
+      curSukarela = Number(match[3])
+    } else if (row.keterangan?.includes('Setoran Awal')) {
+      curPokok = 10000
+      curWajib = 5000
+      curSukarela = Math.max(0, row.kredit - 15000)
+    } else if (row.keterangan?.includes('Wajib') && !row.keterangan?.includes('2%')) {
+      curWajib = row.kredit || row.debet
+    } else {
+      curSukarela = row.kredit > 0 ? row.kredit : row.debet
+    }
+
+    if (row.debet > 0) {
+      // Jika penarikan
+      totalPokok -= curPokok
+      totalWajib -= curWajib
+      totalSukarela -= curSukarela
+    } else {
+      // Jika setoran
+      totalPokok += curPokok
+      totalWajib += curWajib
+      totalSukarela += curSukarela
+    }
+
+    // Update saldo kumulatif di baris mutasi ini
+    const saldoBerjalan = totalPokok + totalWajib + totalSukarela
+    await prisma.bukuTabungan.update({
+      where: { id: row.id },
+      data: { saldo: saldoBerjalan }
+    })
+  }
+
+  // 4. Update total saldo akhir di tabel Profil Anggota
+  await prisma.anggota.update({
+    where: { id: anggotaId },
+    data: {
+      simpananPokok: totalPokok,
+      simpananWajib: totalWajib,
+      simpananSukarela: totalSukarela,
+    }
+  })
+
+  revalidatePath('/')
+}
