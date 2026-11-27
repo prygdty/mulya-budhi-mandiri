@@ -219,7 +219,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
   const hasilSimulasi = hitungPinjaman(simPinjaman, tenorNum, bungaNum, saldoSimpananPeminjam)
 
-  // Statistik Koperasi
+  // Statistik Koperasi (Hanya dari anggota Aktif)
   const totalAnggotaAktifCount = daftarAnggotaAktif.length
   const totalSimpananPokok = daftarAnggotaAktif.reduce((acc, a) => acc + a.simpananPokok, 0)
   const totalSimpananWajib = daftarAnggotaAktif.reduce((acc, a) => acc + a.simpananWajib, 0)
@@ -967,13 +967,13 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     </div>
 
                     <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-xs space-y-2 text-emerald-950">
-                      <p className="font-bold text-sm text-emerald-900">Rincian Pinjaman (Sistem Bunga Putus Tanpa Potongan):</p>
+                      <p className="font-bold text-sm text-emerald-900">Rincian Pinjaman (Sistem Bunga Putus):</p>
                       <div className="flex justify-between"><span>Pokok Pinjaman Diterima Bersih:</span><span className="font-bold text-base">Rp {hasilSimulasi.jumlahPinjaman.toLocaleString('id-ID')}</span></div>
                       <div className="flex justify-between text-blue-800 mt-2"><span>Target Jasa Pinjaman ({hasilSimulasi.bungaPersen}%) / Bln:</span><span className="font-semibold">Rp {hasilSimulasi.jasaBulanan.toLocaleString('id-ID')} / bln</span></div>
                     </div>
 
                     <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-lg text-sm transition">
-                      Cairkan Pinjaman Tanpa Potongan 2%
+                      Cairkan Pinjaman
                     </button>
                   </form>
                 </div>
@@ -1502,7 +1502,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                   {Array.from({ length: Math.max(0, 6 - (kartuPinjamanModal.riwayatAngsuran?.length || 0)) }).map((_, emptyIdx) => (
                     <tr key={`empty-${emptyIdx}`} className="border-b border-slate-300 h-7">
                       <td className="border-x border-slate-800 px-2 text-center text-slate-300">{(kartuPinjamanModal.riwayatAngsuran?.length || 0) + emptyIdx + 1}</td>
-                      <td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800 print:hidden"></td>{role === 'ADMIN' && <td className="border-x border-slate-800 print:hidden"></td>}
+                      <td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800 print:hidden"></td>
                     </tr>
                   ))}
                 </tbody>
