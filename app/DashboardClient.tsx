@@ -316,7 +316,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
     link.setAttribute('href', encodedUri)
     link.setAttribute(
       'download',
-      `Rekap_Koperasi_Mulya_Budhi_Mandiri_${new Date().toISOString().slice(0, 10)}.csv`
+      `Rekap_Koperasi_Mulya_Budi_Mandiri_${new Date().toISOString().slice(0, 10)}.csv`
     )
     document.body.appendChild(link)
     link.click()
@@ -330,7 +330,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
       .reduce((sum: number, p: any) => sum + p.sisaPinjaman, 0)
 
     const headerBuku = [
-      'BUKU - SIMPANAN ANGGOTA KOPERASI MULYA BUDHI MANDIRI',
+      'BUKU - SIMPANAN ANGGOTA KOPERASI MULYA BUDI MANDIRI',
       '',
       '',
       '',
@@ -386,7 +386,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
             </div>
             
             <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 tracking-tight mb-2">
-              Koperasi Mulya Budhi
+              Koperasi Mulya Budi
             </h1>
             <p className="text-slate-500 text-sm mb-10 font-medium">Sistem Informasi Simpan Pinjam</p>
 
@@ -431,7 +431,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
       <header className="bg-emerald-800 text-white shadow-md print:hidden sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">KOPERASI MULYA BUDHI MANDIRI</h1>
+            <h1 className="text-2xl font-bold tracking-tight">KOPERASI MULYA BUDI MANDIRI</h1>
             <p className="text-emerald-200 text-sm">Bagelen • Sistem Simpan Pinjam (Bunga Putus)</p>
           </div>
           <div className="flex flex-wrap items-center gap-4">
@@ -531,7 +531,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                 <span className="bg-emerald-700/80 text-emerald-100 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">
                   Sistem Bunga Putus • Koperasi Simpan Pinjam
                 </span>
-                <h2 className="text-3xl font-extrabold tracking-tight">Selamat Datang di Koperasi Mulya Budhi Mandiri</h2>
+                <h2 className="text-3xl font-extrabold tracking-tight">Selamat Datang di Koperasi Mulya Budi Mandiri</h2>
                 <p className="text-emerald-200 text-sm max-w-xl leading-relaxed">
                   Pantau seluruh sirkulasi kas simpanan, pokok pinjaman beredar, jasa pinjaman, dan pembagian jasa sukarela 0,5% secara terpisah dan transparan.
                 </p>
@@ -1156,7 +1156,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     <div className="w-1/3"></div>
                     <div className="w-1/3 text-center">
                       <h2 className="text-lg font-bold tracking-widest underline underline-offset-4 uppercase">BUKU - SIMPANAN ANGGOTA</h2>
-                      <p className="text-[11px] text-slate-600 mt-0.5">KOPERASI MULYA BUDHI MANDIRI</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">KOPERASI MULYA BUDI MANDIRI</p>
                     </div>
                     <div className="w-1/3 text-xs space-y-1 pl-8">
                       <div className="flex"><span className="w-32">No. Urut Simpanan</span><span className="font-mono font-bold">: {String(indexUrutAnggota).padStart(3, '0')}</span></div>
@@ -1398,7 +1398,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-b-2 border-slate-800 pb-4 mb-5 text-xs">
               <div className="space-y-1">
-                <p className="font-bold text-sm uppercase text-slate-900">KOPERASI SIMPAN PINJAM &ldquo;MULYA BUDHI MANDIRI&rdquo;</p>
+                <p className="font-bold text-sm uppercase text-slate-900">KOPERASI SIMPAN PINJAM &ldquo;MULYA BUDI MANDIRI&rdquo;</p>
                 <p className="text-slate-600">Alamat: Soko Bagelen, Purworejo • Sistem Bunga Putus</p>
                 <p className="text-slate-600">Tenor: <strong>{kartuPinjamanModal.tenorBulan} Bulan</strong> • Jasa: <strong>{kartuPinjamanModal.bungaPersen}% / bulan</strong></p>
               </div>
@@ -1613,7 +1613,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
             <div className="border-2 border-slate-800 p-6 font-mono text-xs space-y-4">
               <div className="flex justify-between border-b-2 border-slate-800 pb-3">
                 <div>
-                  <h2 className="text-base font-bold">KOPERASI MULYA BUDHI MANDIRI</h2>
+                  <h2 className="text-base font-bold">KOPERASI MULYA BUDI MANDIRI</h2>
                   <p className="text-[11px]">Bagelen • Bukti Transaksi Sah</p>
                 </div>
                 <div className="text-right">
