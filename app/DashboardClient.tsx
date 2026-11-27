@@ -10,8 +10,9 @@ import {
   bayarAngsuran,
   ubahStatusAnggota,
   hapusAnggotaPermanen,
-  hapusRiwayatPinjaman, // <--- FUNGSI BARU (Tambahkan di actions.ts nanti)
-  hapusRiwayatSimpanan  // <--- FUNGSI BARU (Tambahkan di actions.ts nanti)
+  hapusRiwayatPinjaman, 
+  hapusRiwayatSimpanan,
+  hapusRiwayatAngsuran 
 } from './actions'
 import { hitungPinjaman, OPSI_TENOR_PINJAMAN } from '@/lib/kalkulator'
 import {
@@ -39,9 +40,11 @@ import {
   RotateCcw,
   LogOut,
   Lock,
-  Search, // <--- IKON PENCARIAN BARU
+  Search,
+  Map 
 } from 'lucide-react'
 
+// Fungsi membaca rincian keterangan buku tabungan
 function parseRincianSimpanan(row: any) {
   const match = row.keterangan?.match(/\(Pokok:(\d+)\|Wajib:(\d+)\|Sukarela:(\d+)\|Lain:(\d+)\)/)
   const cleanUraian = row.keterangan?.replace(/\s*\(Pokok:\d+\|Wajib:\d+\|Sukarela:\d+\|Lain:\d+\)/, '') || row.keterangan
@@ -72,6 +75,33 @@ function parseRincianSimpanan(row: any) {
   }
 }
 
+// FUNGSI BARU: MENGHITUNG TUNGGAKAN JASA OTOMATIS BERDASARKAN TANGGAL
+function hitungTunggakanJasa(pinjaman: any) {
+  if (pinjaman.status !== 'Aktif') return 0;
+  
+  const tglPinjam = new Date(pinjaman.tglPencairan);
+  const now = new Date();
+  
+  // Hitung selisih bulan
+  let blnBerjalan = (now.getFullYear() - tglPinjam.getFullYear()) * 12 + (now.getMonth() - tglPinjam.getMonth());
+  
+  // Jika tanggal hari ini sudah melewati tanggal pencairan, berarti tagihan bulan tersebut sudah jatuh tempo
+  if (now.getDate() >= tglPinjam.getDate()) {
+    blnBerjalan += 1;
+  }
+  
+  // Minimal target adalah 1 bulan
+  if (blnBerjalan < 1) blnBerjalan = 1;
+  
+  // Batasi bulan berjalan agar tidak melebihi tenor maksimal
+  blnBerjalan = Math.min(blnBerjalan, pinjaman.tenorBulan);
+
+  const targetJasa = Math.round(pinjaman.jumlahPinjaman * (pinjaman.bungaPersen / 100)) * blnBerjalan;
+  const tunggakan = targetJasa - (pinjaman.jasaTerbayar || 0);
+  
+  return tunggakan > 0 ? tunggakan : 0;
+}
+
 export default function DashboardClient({ initialAnggota }: { initialAnggota: any[] }) {
   // STATE AUTENTIKASI NEXT-AUTH
   const { data: session, status } = useSession()
@@ -86,14 +116,20 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
   // Logika Filter Anggota (Soft Delete) & FITUR PENCARIAN (SEARCH)
   const [tampilkanAnggota, setTampilkanAnggota] = useState<'Aktif' | 'Keluar'>('Aktif')
-  const [searchQuery, setSearchQuery] = useState('') // <--- STATE PENCARIAN BARU
+  const [searchQuery, setSearchQuery] = useState('') 
+  const [selectedResortFilter, setSelectedResortFilter] = useState<string | null>(null) // STATE FILTER RESORT
 
   const daftarAnggotaAktif = initialAnggota.filter((a) => a.statusAnggota !== 'Keluar')
   const daftarAnggotaKeluar = initialAnggota.filter((a) => a.statusAnggota === 'Keluar')
   
   let anggotaYgDitampilkan = tampilkanAnggota === 'Aktif' ? daftarAnggotaAktif : daftarAnggotaKeluar
 
-  // FILTER PENCARIAN ANGGOTA
+  // TERAPKAN FILTER RESORT
+  if (selectedResortFilter) {
+    anggotaYgDitampilkan = anggotaYgDitampilkan.filter(a => a.resort === selectedResortFilter)
+  }
+
+  // TERAPKAN FILTER PENCARIAN ANGGOTA
   if (searchQuery.trim() !== '') {
     const query = searchQuery.toLowerCase()
     anggotaYgDitampilkan = anggotaYgDitampilkan.filter(a => 
@@ -108,6 +144,34 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
   const defaultResorts = ['Resort 1', 'Resort 2', 'Resort 3', 'Resort 4', 'Resort 5', 'Resort 6', 'Resort 7', 'Resort 8', 'Resort 9', 'Resort 10']
   const gabunganResort = Array.from(new Set([...defaultResorts, ...resortUnikDariDB])).sort()
   
+  // LOGIKA GLOBAL KELOMPOK RESORT (STATISTIK PER RESORT + TUNGGAKAN)
+  const ringkasanResortGlobal = gabunganResort.map(resortName => {
+    const membersInResort = initialAnggota.filter(a => a.resort === resortName && a.statusAnggota === 'Aktif')
+    const totalSimpanan = membersInResort.reduce((sum, a) => sum + a.simpananPokok + a.simpananWajib + a.simpananSukarela, 0)
+    
+    const allActiveLoans = membersInResort.flatMap(a => a.pinjaman.filter((p:any) => p.status === 'Aktif'))
+    const allLoansEver = membersInResort.flatMap(a => a.pinjaman) 
+    
+    const totalPeminjam = allActiveLoans.length
+    const totalSisaPokok = allActiveLoans.reduce((sum, p) => sum + p.sisaPinjaman, 0)
+    const targetJasaPerBulan = allActiveLoans.reduce((sum, p) => sum + Math.round(p.jumlahPinjaman * (p.bungaPersen/100)), 0)
+    const totalPendapatanJasa = allLoansEver.reduce((sum, p) => sum + (p.jasaTerbayar || 0), 0)
+    
+    // Hitung total tunggakan khusus di resort ini
+    const totalTunggakan = allActiveLoans.reduce((sum, p) => sum + hitungTunggakanJasa(p), 0)
+
+    return {
+      resortName,
+      jumlahAnggota: membersInResort.length,
+      totalSimpanan,
+      totalPeminjam,
+      totalSisaPokok,
+      targetJasaPerBulan,
+      totalPendapatanJasa,
+      totalTunggakan // <--- Data Tunggakan diselipkan
+    }
+  }).filter(r => r.jumlahAnggota > 0)
+
   const [daftarResortMode, setDaftarResortMode] = useState<string[]>(gabunganResort)
   const [inputResortBaru, setInputResortBaru] = useState('')
 
@@ -418,7 +482,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
               activeTab === 'ANGGOTA' ? 'bg-emerald-700 text-white shadow' : 'bg-white text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <UserPlus className="w-4 h-4" /> Pendaftaran & Data Anggota ({totalAnggotaAktifCount})
+            <UserPlus className="w-4 h-4" /> Data Resort & Anggota ({totalAnggotaAktifCount})
           </button>
           <button
             onClick={() => setActiveTab('PINJAMAN')}
@@ -426,7 +490,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
               activeTab === 'PINJAMAN' ? 'bg-emerald-700 text-white shadow' : 'bg-white text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <CreditCard className="w-4 h-4" /> Pinjaman & Angsuran (Bunga Putus)
+            <CreditCard className="w-4 h-4" /> Pinjaman & Angsuran
           </button>
           <button
             onClick={() => setActiveTab('BUKU_TABUNGAN')}
@@ -434,7 +498,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
               activeTab === 'BUKU_TABUNGAN' ? 'bg-emerald-700 text-white shadow' : 'bg-white text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <BookOpen className="w-4 h-4" /> Buku Simpanan Anggota (Cetak)
+            <BookOpen className="w-4 h-4" /> Buku Simpanan Anggota
           </button>
           <button
             onClick={() => setActiveTab('TABEL_JASA_05')}
@@ -442,7 +506,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
               activeTab === 'TABEL_JASA_05' ? 'bg-emerald-700 text-white shadow' : 'bg-white text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <BookMarked className="w-4 h-4" /> Tabel Simpanan Jasa 0,5%
+            <BookMarked className="w-4 h-4" /> Tabel Jasa 0,5%
           </button>
           <button
             onClick={() => setActiveTab('INPUT_TRANSAKSI')}
@@ -450,7 +514,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
               activeTab === 'INPUT_TRANSAKSI' ? 'bg-emerald-700 text-white shadow' : 'bg-white text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <Wallet className="w-4 h-4" /> Input Setor / Tarik Simpanan
+            <Wallet className="w-4 h-4" /> Input Setor / Tarik
           </button>
         </div>
       </div>
@@ -583,10 +647,59 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
         )}
 
         {/* ==============================================
-            TAB 2: PENDAFTARAN & DATA ANGGOTA 
+            TAB 2: PENDAFTARAN & DATA ANGGOTA (DENGAN RESORT)
         ============================================== */}
         {activeTab === 'ANGGOTA' && (
-          <div className="space-y-6">
+          <div className="space-y-8">
+            
+            {/* SEKSI: DASHBOARD RESORT GLOBAL */}
+            <div>
+              <div className="flex justify-between items-end mb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"> Ringkasan Global Per Resort</h2>
+                  <p className="text-sm text-slate-500 mt-1">Klik pada salah satu resort di bawah untuk melihat daftar anggota spesifik di resort tersebut.</p>
+                </div>
+                {selectedResortFilter && (
+                  <button onClick={() => setSelectedResortFilter(null)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow transition">
+                    Tampilkan Semua Resort
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {ringkasanResortGlobal.map((r, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => setSelectedResortFilter(r.resortName)}
+                    className={`p-5 rounded-xl border-2 transition cursor-pointer shadow-sm group ${selectedResortFilter === r.resortName ? 'border-emerald-600 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-400 hover:bg-slate-50'}`}
+                  >
+                    <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-3">
+                      <h3 className="font-extrabold text-lg text-slate-800">{r.resortName}</h3>
+                      <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full">{r.jumlahAnggota} Orang</span>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-slate-500">Total Kas Simpanan:</span><strong className="text-emerald-700">Rp {r.totalSimpanan.toLocaleString('id-ID')}</strong></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Total Sisa Pokok Hutang:</span><strong className="text-amber-700">Rp {r.totalSisaPokok.toLocaleString('id-ID')}</strong></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Peminjam Aktif:</span><strong>{r.totalPeminjam} Orang</strong></div>
+                      <div className="pt-2 border-t border-slate-100 mt-2">
+                        <div className="flex justify-between text-xs"><span className="text-slate-500">Target Jasa / Bulan:</span><strong className="text-blue-700">Rp {r.targetJasaPerBulan.toLocaleString('id-ID')}</strong></div>
+                        <div className="flex justify-between text-xs"><span className="text-slate-500">Total Jasa Diterima:</span><strong className="text-slate-800">Rp {r.totalPendapatanJasa.toLocaleString('id-ID')}</strong></div>
+                      </div>
+                      {/* Peringatan Nunggak Resort */}
+                      {r.totalTunggakan > 0 && (
+                        <div className="mt-2 pt-2 border-t border-red-200/50">
+                          <div className="flex justify-between text-xs items-center bg-red-50 p-1.5 rounded border border-red-100">
+                            <span className="text-red-700 font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Total Nunggak Jasa:</span>
+                            <strong className="text-red-700">Rp {r.totalTunggakan.toLocaleString('id-ID')}</strong>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {role === 'ADMIN' && (
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -642,7 +755,9 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
             <div className="flex flex-wrap justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <div className="flex items-center gap-4">
-                <h3 className="font-bold text-slate-800">Tabel Anggota & Simpanan</h3>
+                <h3 className="font-bold text-slate-800">
+                  Tabel Anggota {selectedResortFilter ? `di ${selectedResortFilter}` : '& Simpanan'}
+                </h3>
                 
                 {/* TOGGLE AKTIF / KELUAR */}
                 <div className="flex bg-slate-100 p-1 rounded-lg">
@@ -650,18 +765,18 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     onClick={() => setTampilkanAnggota('Aktif')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition ${tampilkanAnggota === 'Aktif' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
                   >
-                    Anggota Aktif ({daftarAnggotaAktif.length})
+                    Anggota Aktif
                   </button>
                   <button 
                     onClick={() => setTampilkanAnggota('Keluar')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition ${tampilkanAnggota === 'Keluar' ? 'bg-red-50 text-red-700 shadow-sm' : 'text-slate-500'}`}
                   >
-                    Anggota Keluar ({daftarAnggotaKeluar.length})
+                    Anggota Keluar
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                {/* KOLOM PENCARIAN ANGGOTA (BARU) */}
+              <div className="flex items-center gap-3 mt-3 md:mt-0">
+                {/* KOLOM PENCARIAN ANGGOTA */}
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Search className="w-4 h-4 text-slate-400" />
@@ -707,6 +822,9 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                       const sisaPokokPinjaman = a.pinjaman.filter((p: any) => p.status === 'Aktif').reduce((sum: number, p: any) => sum + p.sisaPinjaman, 0)
                       const totalJasaPinjamanTerbayar = a.pinjaman.reduce((sum: number, p: any) => sum + (p.jasaTerbayar || 0), 0)
                       const jasaBulananAktif = a.pinjaman.filter((p: any) => p.status === 'Aktif').reduce((sum: number, p: any) => sum + Math.round(p.jumlahPinjaman * (p.bungaPersen / 100)), 0)
+                      
+                      // Cek apakah anggota ini menunggak
+                      const tunggakanAnggota = a.pinjaman.reduce((sum: number, p: any) => sum + hitungTunggakanJasa(p), 0);
 
                       return (
                         <tr key={a.id} className={a.statusAnggota === 'Keluar' ? 'bg-red-50/40' : 'hover:bg-emerald-50/40 transition'}>
@@ -731,6 +849,13 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                           <td className="py-3 px-4 text-right bg-blue-50/40 text-blue-700 font-bold">
                             Rp {totalJasaPinjamanTerbayar.toLocaleString('id-ID')}
                             {sisaPokokPinjaman > 0 && <div className="text-[11px] font-normal text-slate-500">Tagihan/bln: Rp {jasaBulananAktif.toLocaleString('id-ID')}</div>}
+                            
+                            {/* INDIKATOR NUNGGAK */}
+                            {tunggakanAnggota > 0 && (
+                              <div className="mt-1 inline-flex items-center gap-1 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[10px] font-extrabold border border-red-300">
+                                <AlertCircle className="w-3 h-3" /> NUNGGAK: Rp {tunggakanAnggota.toLocaleString('id-ID')}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-4 text-center">
                             <div className="flex flex-col items-center justify-center gap-1.5">
@@ -802,7 +927,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
         )}
 
         {/* ==============================================
-            TAB 3: PINJAMAN & ANGSURAN
+            TAB 3: PINJAMAN & ANGSURAN (TANPA POTONGAN 2%)
         ============================================== */}
         {activeTab === 'PINJAMAN' && (
           <div className="space-y-6">
@@ -843,18 +968,13 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     </div>
 
                     <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-xs space-y-2 text-emerald-950">
-                      <p className="font-bold text-sm text-emerald-900">Rincian Pinjaman (Sistem Bunga Putus):</p>
-                      <div className="flex justify-between"><span>Saldo Simpanan Anggota Saat Ini:</span><span className="font-bold">Rp {saldoSimpananPeminjam.toLocaleString('id-ID')}</span></div>
-                      <div className="flex justify-between text-red-700 font-semibold"><span>Diambil 2% dari Saldo Simpanannya:</span><span>- Rp {hasilSimulasi.ambil2PersenDariSimpanan.toLocaleString('id-ID')}</span></div>
-                      <div className="border-t border-emerald-200 pt-1.5 space-y-1">
-                        <div className="flex justify-between"><span>Pokok Pinjaman (Bunga Putus):</span><span className="font-bold">Rp {hasilSimulasi.jumlahPinjaman.toLocaleString('id-ID')}</span></div>
-                        <div className="flex justify-between text-blue-800"><span>Estimasi Angsuran Pokok / Bulan:</span><span className="font-semibold">Rp {hasilSimulasi.angsuranPokokBulanan.toLocaleString('id-ID')} / bln</span></div>
-                        <div className="flex justify-between text-blue-800"><span>Jasa Pinjaman ({hasilSimulasi.bungaPersen}%) / Bulan:</span><span className="font-semibold">Rp {hasilSimulasi.jasaBulanan.toLocaleString('id-ID')} / bln</span></div>
-                      </div>
+                      <p className="font-bold text-sm text-emerald-900">Rincian Pinjaman (Sistem Bunga Putus Tanpa Potongan):</p>
+                      <div className="flex justify-between"><span>Pokok Pinjaman Diterima Bersih:</span><span className="font-bold text-base">Rp {hasilSimulasi.jumlahPinjaman.toLocaleString('id-ID')}</span></div>
+                      <div className="flex justify-between text-blue-800 mt-2"><span>Target Jasa Pinjaman ({hasilSimulasi.bungaPersen}%) / Bln:</span><span className="font-semibold">Rp {hasilSimulasi.jasaBulanan.toLocaleString('id-ID')} / bln</span></div>
                     </div>
 
                     <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-lg text-sm transition">
-                      Cairkan Pinjaman
+                      Cairkan Pinjaman Tanpa Potongan 2%
                     </button>
                   </form>
                 </div>
@@ -923,35 +1043,52 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {semuaPinjaman.map((p: any) => (
-                    <tr key={p.id} className={`transition ${p.status === 'Lunas' ? 'bg-slate-50 opacity-75' : 'hover:bg-emerald-50'}`}>
-                      <td className="py-3 px-4 font-mono text-xs cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{new Date(p.tglPencairan).toLocaleDateString('id-ID')}</td>
-                      <td className="py-3 px-4 font-bold text-emerald-900 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.noAnggota} - {p.namaAnggota}</td>
-                      <td className="py-3 px-4 text-right cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>Rp {p.jumlahPinjaman.toLocaleString('id-ID')}</td>
-                      <td className="py-3 px-4 text-center cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.tenorBulan} Bln ({p.bungaPersen}%)</td>
-                      <td className="py-3 px-4 text-right font-bold text-amber-700 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.status === 'Lunas' ? 'LUNAS' : `Rp ${p.sisaPinjaman.toLocaleString('id-ID')}`}</td>
-                      <td className="py-3 px-4 text-center"><button onClick={() => setKartuPinjamanModal(p)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-semibold">Buka Kartu</button></td>
-                      {/* TOMBOL HAPUS PINJAMAN PERMANEN */}
-                      {role === 'ADMIN' && (
-                        <td className="py-3 px-4 text-center">
-                          <form action={hapusRiwayatPinjaman}>
-                            <input type="hidden" name="pinjamanId" value={p.id} />
-                            <button 
-                              type="submit" 
-                              className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition"
-                              onClick={(e) => {
-                                if(!confirm(`HAPUS PINJAMAN INI?\nData pokok hutang dan seluruh riwayat pembayaran angsuran untuk pinjaman ini akan dihapus permanen.\n(Sisa Hutang: Rp ${p.sisaPinjaman.toLocaleString('id-ID')})\nLanjutkan?`)) {
-                                  e.preventDefault();
-                                }
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </form>
+                  {semuaPinjaman.map((p: any) => {
+                    const tunggakanP = hitungTunggakanJasa(p);
+                    
+                    return (
+                      <tr key={p.id} className={`transition ${p.status === 'Lunas' ? 'bg-slate-50 opacity-75' : 'hover:bg-emerald-50'}`}>
+                        <td className="py-3 px-4 font-mono text-xs cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{new Date(p.tglPencairan).toLocaleDateString('id-ID')}</td>
+                        <td className="py-3 px-4 font-bold text-emerald-900 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.noAnggota} - {p.namaAnggota}</td>
+                        <td className="py-3 px-4 text-right cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>Rp {p.jumlahPinjaman.toLocaleString('id-ID')}</td>
+                        <td className="py-3 px-4 text-center cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>{p.tenorBulan} Bln ({p.bungaPersen}%)</td>
+                        
+                        <td className="py-3 px-4 text-right font-bold text-amber-700 cursor-pointer" onClick={() => setKartuPinjamanModal(p)}>
+                          {p.status === 'Lunas' ? 'LUNAS' : `Rp ${p.sisaPinjaman.toLocaleString('id-ID')}`}
+                          {/* INDIKATOR NUNGGAK PINJAMAN */}
+                          {tunggakanP > 0 && (
+                            <div className="block mt-1">
+                              <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold border border-red-200">
+                                Peringatan: Nunggak
+                              </span>
+                            </div>
+                          )}
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        
+                        <td className="py-3 px-4 text-center"><button onClick={() => setKartuPinjamanModal(p)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-semibold">Buka Kartu</button></td>
+                        
+                        {/* TOMBOL HAPUS PINJAMAN PERMANEN */}
+                        {role === 'ADMIN' && (
+                          <td className="py-3 px-4 text-center">
+                            <form action={hapusRiwayatPinjaman}>
+                              <input type="hidden" name="pinjamanId" value={p.id} />
+                              <button 
+                                type="submit" 
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition"
+                                onClick={(e) => {
+                                  if(!confirm(`HAPUS PINJAMAN INI?\nData pokok hutang dan seluruh riwayat pembayaran angsuran untuk pinjaman ini akan dihapus permanen.\n(Sisa Hutang: Rp ${p.sisaPinjaman.toLocaleString('id-ID')})\nLanjutkan?`)) {
+                                    e.preventDefault();
+                                  }
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </form>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1245,7 +1382,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
       </main>
 
       {/* =========================================================================
-          MODAL TABEL KARTU ANGSURAN LENGKAP
+          MODAL TABEL KARTU ANGSURAN LENGKAP (REVISI KUMULATIF & HAPUS ROW)
       ========================================================================= */}
       {kartuPinjamanModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 md:p-6 print:static print:bg-white print:p-0 overflow-y-auto">
@@ -1279,67 +1416,83 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                 <thead>
                   <tr className="bg-sky-100 text-slate-900 border-b-2 border-slate-900">
                     <th className="border border-slate-800 py-2 px-2 text-center">Tanggal</th>
-                    <th className="border border-slate-800 py-2 px-2 text-right">Jasa</th>
                     <th className="border border-slate-800 py-2 px-2 text-right">Pokok</th>
-                    <th className="border border-slate-800 py-2 px-2 text-right">Simpanan</th>
-                    <th className="border border-slate-800 py-2 px-2 text-right">Angsuran<br />Tunggakan Jasa</th>
-                    <th className="border border-slate-800 py-2 px-2 text-right">Jumlah</th>
+                    <th className="border border-slate-800 py-2 px-2 text-right">Jasa</th>
+                    <th className="border border-slate-800 py-2 px-2 text-right">Jumlah Setor</th>
                     <th className="border border-slate-800 py-2 px-2 text-right">Jasa yang<br />belum dibayar</th>
                     <th className="border border-slate-800 py-2 px-2 text-center">Cicilan</th>
                     <th className="border border-slate-800 py-2 px-2 text-right">Sisa Pinjaman</th>
                     <th className="border border-slate-800 py-2 px-2 text-center">Tanda Tangan<br />Anggota</th>
-                    <th className="border border-slate-800 py-2 px-2 text-center print:hidden bg-slate-100 text-slate-700">Kuitansi</th>
+                    <th className="border border-slate-800 py-2 px-1 text-center print:hidden bg-slate-100 text-slate-700">Kuitansi</th>
+                    {role === 'ADMIN' && <th className="border border-slate-800 py-2 px-1 text-center print:hidden bg-red-50 text-red-700">Hapus</th>}
                   </tr>
                 </thead>
                 <tbody>
+                  {/* BARIS AWAL PENCAIRAN */}
                   <tr className="bg-slate-50 border-b border-slate-400">
                     <td className="border-x border-slate-800 py-1.5 px-2 text-center">{new Date(kartuPinjamanModal.tglPencairan).toLocaleDateString('id-ID')}</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-right">-</td>
-                    <td className="border-x border-slate-800 py-1.5 px-2 text-right">-</td>
-                    <td className="border-x border-slate-800 py-1.5 px-2 text-right text-blue-700">{kartuPinjamanModal.setoranSimpanan2Persen > 0 ? `-${kartuPinjamanModal.setoranSimpanan2Persen.toLocaleString('id-ID')}` : '-'}</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-right">-</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-right">-</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-right">-</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-center">Awal</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-right font-bold">{kartuPinjamanModal.jumlahPinjaman.toLocaleString('id-ID')}</td>
                     <td className="border-x border-slate-800 py-1.5 px-2 text-center text-[10px] text-slate-400">-</td>
-                    <td className="border-x border-slate-800 py-1.5 px-2 text-center print:hidden font-sans bg-slate-50">
-                      <button onClick={() => setKuitansiModal({ noKuitansi: `KW-AWL-${kartuPinjamanModal.id.slice(0, 5).toUpperCase()}`, tanggal: new Date(kartuPinjamanModal.tglPencairan).toLocaleDateString('id-ID'), namaAnggota: kartuPinjamanModal.namaAnggota, noAnggota: kartuPinjamanModal.noAnggota, jenisTransaksi: 'PENCAIRAN PINJAMAN AWAL', nominal: kartuPinjamanModal.jumlahPinjaman, keterangan: `Pencairan Pokok Pinjaman Tenor ${kartuPinjamanModal.tenorBulan} Bulan (Jasa ${kartuPinjamanModal.bungaPersen}%/bln). Ambil 2% saldo simpanan: Rp ${kartuPinjamanModal.setoranSimpanan2Persen.toLocaleString('id-ID')}.` })} className="inline-flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold border border-emerald-300">
-                        <Receipt className="w-3 h-3" /> Cetak
-                      </button>
+                    <td className="border-x border-slate-800 py-1.5 px-1 text-center print:hidden font-sans bg-slate-50">
+                      <button onClick={() => setKuitansiModal({ noKuitansi: `KW-AWL-${kartuPinjamanModal.id.slice(0, 5).toUpperCase()}`, tanggal: new Date(kartuPinjamanModal.tglPencairan).toLocaleDateString('id-ID'), namaAnggota: kartuPinjamanModal.namaAnggota, noAnggota: kartuPinjamanModal.noAnggota, jenisTransaksi: 'PENCAIRAN PINJAMAN', nominal: kartuPinjamanModal.jumlahPinjaman, keterangan: `Pencairan Pokok Pinjaman Tenor ${kartuPinjamanModal.tenorBulan} Bulan (Jasa ${kartuPinjamanModal.bungaPersen}%/bln).` })} className="inline-flex justify-center items-center bg-emerald-100 hover:bg-emerald-200 text-emerald-800 p-1.5 rounded"><Receipt className="w-3.5 h-3.5" /></button>
                     </td>
+                    {role === 'ADMIN' && <td className="border-x border-slate-800 py-1.5 px-1 print:hidden bg-slate-50"></td>}
                   </tr>
 
-                  {(kartuPinjamanModal.riwayatAngsuran || []).map((ang: any, idx: number) => {
-                    const jasaBulananStandar = Math.round(kartuPinjamanModal.jumlahPinjaman * (kartuPinjamanModal.bungaPersen / 100))
-                    const tunggakanJasa = Math.max(0, jasaBulananStandar - (ang.bayarJasa || 0))
-                    const jumlahSetoran = (ang.bayarPokok || 0) + (ang.bayarJasa || 0)
-                    const jasaBelumDibayar = ang.sisaPokok === 0 ? 0 : tunggakanJasa
+                  {/* BARIS ANGSURAN */}
+                  {(() => {
+                    // Urutkan riwayat berdasarkan tanggal bayar yang terlama ke terbaru
+                    const riwayatSorted = [...(kartuPinjamanModal.riwayatAngsuran || [])].sort((a,b) => new Date(a.tglBayar).getTime() - new Date(b.tglBayar).getTime());
+                    let runningJasaPaid = 0;
 
-                    return (
-                      <tr key={ang.id} className="border-b border-slate-400 hover:bg-sky-50/50">
-                        <td className="border-x border-slate-800 py-2 px-2 text-center">{new Date(ang.tglBayar).toLocaleDateString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right text-blue-800 font-semibold">{(ang.bayarJasa || 0).toLocaleString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right text-amber-800 font-semibold">{(ang.bayarPokok || 0).toLocaleString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right">-</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right">{tunggakanJasa > 0 ? tunggakanJasa.toLocaleString('id-ID') : '0'}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right font-bold text-emerald-800">{jumlahSetoran.toLocaleString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right">{jasaBelumDibayar.toLocaleString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-center font-bold">Ke-{idx + 1}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-right font-extrabold">{(ang.sisaPokok || 0).toLocaleString('id-ID')}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-center text-[10px] font-sans text-slate-600">✓ {kartuPinjamanModal.namaAnggota}</td>
-                        <td className="border-x border-slate-800 py-2 px-2 text-center print:hidden font-sans bg-slate-50">
-                          <button onClick={() => setKuitansiModal({ noKuitansi: `KW-ANG-${ang.id.slice(0, 5).toUpperCase()}`, tanggal: new Date(ang.tglBayar).toLocaleDateString('id-ID'), namaAnggota: kartuPinjamanModal.namaAnggota, noAnggota: kartuPinjamanModal.noAnggota, jenisTransaksi: `PEMBAYARAN ANGSURAN KE-${idx + 1}`, nominal: jumlahSetoran, keterangan: `Bayar Pokok Rp ${(ang.bayarPokok || 0).toLocaleString('id-ID')} + Jasa Rp ${(ang.bayarJasa || 0).toLocaleString('id-ID')}. Sisa Pokok: Rp ${(ang.sisaPokok || 0).toLocaleString('id-ID')}.` })} className="inline-flex items-center gap-1 bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded text-[10px] font-bold border border-amber-300">
-                            <Receipt className="w-3 h-3" /> Cetak
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                    return riwayatSorted.map((ang: any, idx: number) => {
+                      const jumlahSetoran = (ang.bayarPokok || 0) + (ang.bayarJasa || 0)
+                      
+                      // Perhitungan Tunggakan / Kelebihan Jasa (Kumulatif)
+                      runningJasaPaid += (ang.bayarJasa || 0);
+                      const targetJasaBulanan = Math.round(kartuPinjamanModal.jumlahPinjaman * (kartuPinjamanModal.bungaPersen / 100));
+                      const cumulativeTargetJasa = targetJasaBulanan * (idx + 1); 
+                      const tunggakanRow = cumulativeTargetJasa - runningJasaPaid; // Jika minus, berarti bayar lebih
+
+                      return (
+                        <tr key={ang.id} className="border-b border-slate-400 hover:bg-sky-50/50">
+                          <td className="border-x border-slate-800 py-2 px-2 text-center">{new Date(ang.tglBayar).toLocaleDateString('id-ID')}</td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-right text-amber-800 font-semibold">{(ang.bayarPokok || 0).toLocaleString('id-ID')}</td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-right text-blue-800 font-semibold">{(ang.bayarJasa || 0).toLocaleString('id-ID')}</td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-right font-bold text-emerald-800">{jumlahSetoran.toLocaleString('id-ID')}</td>
+                          <td className={`border-x border-slate-800 py-2 px-2 text-right font-semibold ${tunggakanRow < 0 ? 'text-emerald-600' : tunggakanRow > 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                            {tunggakanRow < 0 ? `+ ${(Math.abs(tunggakanRow)).toLocaleString('id-ID')} (Lebih)` : tunggakanRow.toLocaleString('id-ID')}
+                          </td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-center font-bold">Ke-{idx + 1}</td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-right font-extrabold">{(ang.sisaPokok || 0).toLocaleString('id-ID')}</td>
+                          <td className="border-x border-slate-800 py-2 px-2 text-center text-[10px] font-sans text-slate-600">✓ {kartuPinjamanModal.namaAnggota}</td>
+                          <td className="border-x border-slate-800 py-2 px-1 text-center print:hidden font-sans bg-slate-50">
+                            <button onClick={() => setKuitansiModal({ noKuitansi: `KW-ANG-${ang.id.slice(0, 5).toUpperCase()}`, tanggal: new Date(ang.tglBayar).toLocaleDateString('id-ID'), namaAnggota: kartuPinjamanModal.namaAnggota, noAnggota: kartuPinjamanModal.noAnggota, jenisTransaksi: `PEMBAYARAN ANGSURAN KE-${idx + 1}`, nominal: jumlahSetoran, keterangan: `Bayar Pokok Rp ${(ang.bayarPokok || 0).toLocaleString('id-ID')} + Jasa Rp ${(ang.bayarJasa || 0).toLocaleString('id-ID')}. Sisa Pokok: Rp ${(ang.sisaPokok || 0).toLocaleString('id-ID')}.` })} className="inline-flex justify-center items-center bg-amber-100 hover:bg-amber-200 text-amber-900 p-1.5 rounded"><Receipt className="w-3.5 h-3.5" /></button>
+                          </td>
+                          {role === 'ADMIN' && (
+                            <td className="border-x border-slate-800 py-2 px-1 text-center print:hidden font-sans bg-slate-50">
+                              <form action={hapusRiwayatAngsuran}>
+                                <input type="hidden" name="angsuranId" value={ang.id} />
+                                <input type="hidden" name="pinjamanId" value={kartuPinjamanModal.id} />
+                                <button type="submit" className="inline-flex justify-center items-center bg-red-50 hover:bg-red-200 text-red-600 p-1.5 rounded transition" onClick={(e) => { if(!confirm(`Yakin ingin membatalkan/menghapus pembayaran angsuran ini secara permanen? Sisa hutang akan dihitung ulang secara otomatis.`)) e.preventDefault(); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                              </form>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    });
+                  })()}
+
+                  {/* BARIS KOSONG PENAMBAH */}
                   {Array.from({ length: Math.max(0, 6 - (kartuPinjamanModal.riwayatAngsuran?.length || 0)) }).map((_, emptyIdx) => (
                     <tr key={`empty-${emptyIdx}`} className="border-b border-slate-300 h-7">
                       <td className="border-x border-slate-800 px-2 text-center text-slate-300">{(kartuPinjamanModal.riwayatAngsuran?.length || 0) + emptyIdx + 1}</td>
-                      <td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800 print:hidden"></td>
+                      <td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800"></td><td className="border-x border-slate-800 print:hidden"></td>{role === 'ADMIN' && <td className="border-x border-slate-800 print:hidden"></td>}
                     </tr>
                   ))}
                 </tbody>

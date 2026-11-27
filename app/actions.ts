@@ -236,22 +236,8 @@ export async function ajukanPinjaman(formData: FormData) {
   const tglPencairanInput = formData.get('tglPencairan') as string
   const tglPencairan = tglPencairanInput ? new Date(tglPencairanInput) : new Date()
 
-  const anggota = await prisma.anggota.findUnique({ where: { id: anggotaId } })
-  if (!anggota) throw new Error('Anggota tidak ditemukan')
-
-  const totalSaldoSaatIni =
-    anggota.simpananPokok + anggota.simpananWajib + anggota.simpananSukarela
-
-  const rincian = hitungPinjaman(jumlahPinjaman, tenorBulan, bungaPersen, totalSaldoSaatIni)
-  const nominalDiambil2Persen = rincian.ambil2PersenDariSimpanan
-
-  let kurangiSukarela = Math.min(anggota.simpananSukarela, nominalDiambil2Persen)
-  let sisaKurang = nominalDiambil2Persen - kurangiSukarela
-  let kurangiWajib = Math.min(anggota.simpananWajib, sisaKurang)
-
-  const saldoTabunganSetelahDiambil2Persen =
-    totalSaldoSaatIni - (kurangiSukarela + kurangiWajib)
-
+  // PERUBAHAN: Aturan pemotongan 2% dari simpanan telah Dihapus.
+  // Pinjaman langsung dicatat tanpa memotong simpanan wajib/sukarela.
   await prisma.$transaction([
     prisma.pinjaman.create({
       data: {
@@ -259,7 +245,7 @@ export async function ajukanPinjaman(formData: FormData) {
         jumlahPinjaman,
         tenorBulan,
         bungaPersen,
-        setoranSimpanan2Persen: nominalDiambil2Persen,
+        setoranSimpanan2Persen: 0, // Diubah menjadi 0
         sisaPinjaman: jumlahPinjaman,
         jasaTerbayar: 0,
         tglPencairan,
@@ -269,22 +255,9 @@ export async function ajukanPinjaman(formData: FormData) {
     prisma.anggota.update({
       where: { id: anggotaId },
       data: {
-        simpananSukarela: { decrement: kurangiSukarela },
-        simpananWajib: { decrement: kurangiWajib },
         statusPinjaman: 'Aktif',
       },
-    }),
-    prisma.bukuTabungan.create({
-      data: {
-        anggotaId,
-        tgl: tglPencairan,
-        sandi: 'PINJAM_2P',
-        debet: nominalDiambil2Persen,
-        kredit: 0,
-        saldo: saldoTabunganSetelahDiambil2Persen,
-        keterangan: `Ambil 2% Simpanan untuk Pinjaman Rp${jumlahPinjaman.toLocaleString('id-ID')} (Pokok:0|Wajib:${kurangiWajib}|Sukarela:${kurangiSukarela}|Lain:0)`,
-      },
-    }),
+    })
   ])
 
   revalidatePath('/')
@@ -459,6 +432,45 @@ export async function hapusRiwayatSimpanan(formData: FormData) {
       simpananWajib: totalWajib,
       simpananSukarela: totalSukarela,
     }
+  })
+
+  revalidatePath('/')
+}
+
+// =========================================================================
+// FUNGSI BARU: MENGHAPUS 1X TRANSAKSI ANGSURAN & MENGHITUNG ULANG HUTANG
+// =========================================================================
+export async function hapusRiwayatAngsuran(formData: FormData) {
+  const angsuranId = formData.get('angsuranId') as string
+  const pinjamanId = formData.get('pinjamanId') as string
+
+  // 1. Ambil data angsuran yang mau dihapus beserta data pinjaman induknya
+  const angsuran = await prisma.pembayaranAngsuran.findUnique({ 
+    where: { id: angsuranId }, 
+    include: { pinjaman: true } 
+  })
+  if(!angsuran) return;
+  
+  // 2. Hapus baris angsuran tersebut
+  await prisma.pembayaranAngsuran.delete({ where: { id: angsuranId } })
+
+  // 3. Hitung ulang total sisa pokok dan jasa yang sudah dibayar dari sisa riwayat yang ada
+  const sisaAngsuran = await prisma.pembayaranAngsuran.findMany({ where: { pinjamanId } })
+  const totalPokokDibayar = sisaAngsuran.reduce((acc, curr) => acc + curr.bayarPokok, 0)
+  const totalJasaDibayar = sisaAngsuran.reduce((acc, curr) => acc + curr.bayarJasa, 0)
+  
+  const sisaPokokBaru = Math.max(0, angsuran.pinjaman.jumlahPinjaman - totalPokokDibayar)
+  const statusBaru = sisaPokokBaru === 0 ? 'Lunas' : 'Aktif'
+
+  // 4. Update data pinjaman dan status anggota
+  await prisma.pinjaman.update({
+    where: { id: pinjamanId },
+    data: { sisaPinjaman: sisaPokokBaru, jasaTerbayar: totalJasaDibayar, status: statusBaru }
+  })
+  
+  await prisma.anggota.update({
+    where: { id: angsuran.pinjaman.anggotaId },
+    data: { statusPinjaman: statusBaru === 'Lunas' ? 'Tidak Ada' : 'Aktif' }
   })
 
   revalidatePath('/')
