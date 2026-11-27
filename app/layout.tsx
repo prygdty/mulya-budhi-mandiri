@@ -6,7 +6,7 @@ import { Providers } from "./Providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Koperasi Mulyo Dadi Mandiri",
+  title: "Koperasi Mulya Budi Mandiri",
   description: "Sistem Informasi Simpan Pinjam Bagelen",
 };
 
