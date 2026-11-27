@@ -75,25 +75,25 @@ function parseRincianSimpanan(row: any) {
   }
 }
 
-// FUNGSI BARU: MENGHITUNG TUNGGAKAN JASA OTOMATIS BERDASARKAN TANGGAL
+// LOGIKA BARU: TUNGGAKAN DIHITUNG BERDASARKAN SELISIH TANGGAL (BUKAN JUMLAH TRANSAKSI)
 function hitungTunggakanJasa(pinjaman: any) {
   if (pinjaman.status !== 'Aktif') return 0;
   
   const tglPinjam = new Date(pinjaman.tglPencairan);
   const now = new Date();
   
-  // Hitung selisih bulan
+  // Hitung selisih bulan sebenarnya
   let blnBerjalan = (now.getFullYear() - tglPinjam.getFullYear()) * 12 + (now.getMonth() - tglPinjam.getMonth());
   
-  // Jika tanggal hari ini sudah melewati tanggal pencairan, berarti tagihan bulan tersebut sudah jatuh tempo
-  if (now.getDate() >= tglPinjam.getDate()) {
-    blnBerjalan += 1;
+  // Jika hari ini belum melewati tanggal jatuh tempo di bulan tersebut, kurangi 1
+  if (now.getDate() < tglPinjam.getDate()) {
+     blnBerjalan -= 1;
   }
   
-  // Minimal target adalah 1 bulan
-  if (blnBerjalan < 1) blnBerjalan = 1;
+  // Minimal tetap ditagih 1 bulan (untuk bulan pertama)
+  blnBerjalan = Math.max(1, blnBerjalan);
   
-  // Batasi bulan berjalan agar tidak melebihi tenor maksimal
+  // Maksimal tagihan tidak melebihi total tenor
   blnBerjalan = Math.min(blnBerjalan, pinjaman.tenorBulan);
 
   const targetJasa = Math.round(pinjaman.jumlahPinjaman * (pinjaman.bungaPersen / 100)) * blnBerjalan;
@@ -114,10 +114,10 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
     'RINGKASAN' | 'ANGGOTA' | 'PINJAMAN' | 'BUKU_TABUNGAN' | 'TABEL_JASA_05' | 'INPUT_TRANSAKSI'
   >('RINGKASAN')
 
-  // Logika Filter Anggota (Soft Delete) & FITUR PENCARIAN (SEARCH)
+  // Logika Filter Anggota & PENCARIAN (SEARCH)
   const [tampilkanAnggota, setTampilkanAnggota] = useState<'Aktif' | 'Keluar'>('Aktif')
   const [searchQuery, setSearchQuery] = useState('') 
-  const [selectedResortFilter, setSelectedResortFilter] = useState<string | null>(null) // STATE FILTER RESORT
+  const [selectedResortFilter, setSelectedResortFilter] = useState<string | null>(null)
 
   const daftarAnggotaAktif = initialAnggota.filter((a) => a.statusAnggota !== 'Keluar')
   const daftarAnggotaKeluar = initialAnggota.filter((a) => a.statusAnggota === 'Keluar')
@@ -157,7 +157,6 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
     const targetJasaPerBulan = allActiveLoans.reduce((sum, p) => sum + Math.round(p.jumlahPinjaman * (p.bungaPersen/100)), 0)
     const totalPendapatanJasa = allLoansEver.reduce((sum, p) => sum + (p.jasaTerbayar || 0), 0)
     
-    // Hitung total tunggakan khusus di resort ini
     const totalTunggakan = allActiveLoans.reduce((sum, p) => sum + hitungTunggakanJasa(p), 0)
 
     return {
@@ -168,7 +167,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
       totalSisaPokok,
       targetJasaPerBulan,
       totalPendapatanJasa,
-      totalTunggakan // <--- Data Tunggakan diselipkan
+      totalTunggakan
     }
   }).filter(r => r.jumlahAnggota > 0)
 
@@ -220,7 +219,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
 
   const hasilSimulasi = hitungPinjaman(simPinjaman, tenorNum, bungaNum, saldoSimpananPeminjam)
 
-  // Statistik Koperasi (Hanya dari anggota Aktif)
+  // Statistik Koperasi
   const totalAnggotaAktifCount = daftarAnggotaAktif.length
   const totalSimpananPokok = daftarAnggotaAktif.reduce((acc, a) => acc + a.simpananPokok, 0)
   const totalSimpananWajib = daftarAnggotaAktif.reduce((acc, a) => acc + a.simpananWajib, 0)
@@ -1382,7 +1381,7 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
       </main>
 
       {/* =========================================================================
-          MODAL TABEL KARTU ANGSURAN LENGKAP (REVISI KUMULATIF & HAPUS ROW)
+          MODAL TABEL KARTU ANGSURAN LENGKAP (REVISI LOGIKA TUNGGAKAN JASA)
       ========================================================================= */}
       {kartuPinjamanModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 md:p-6 print:static print:bg-white print:p-0 overflow-y-auto">
@@ -1444,20 +1443,31 @@ export default function DashboardClient({ initialAnggota }: { initialAnggota: an
                     {role === 'ADMIN' && <td className="border-x border-slate-800 py-1.5 px-1 print:hidden bg-slate-50"></td>}
                   </tr>
 
-                  {/* BARIS ANGSURAN */}
+                  {/* BARIS ANGSURAN (LOGIKA TUNGGAKAN DIPERBAIKI) */}
                   {(() => {
-                    // Urutkan riwayat berdasarkan tanggal bayar yang terlama ke terbaru
                     const riwayatSorted = [...(kartuPinjamanModal.riwayatAngsuran || [])].sort((a,b) => new Date(a.tglBayar).getTime() - new Date(b.tglBayar).getTime());
                     let runningJasaPaid = 0;
+                    const tglPencairan = new Date(kartuPinjamanModal.tglPencairan);
+                    const targetJasaBulanan = Math.round(kartuPinjamanModal.jumlahPinjaman * (kartuPinjamanModal.bungaPersen / 100));
 
                     return riwayatSorted.map((ang: any, idx: number) => {
-                      const jumlahSetoran = (ang.bayarPokok || 0) + (ang.bayarJasa || 0)
-                      
-                      // Perhitungan Tunggakan / Kelebihan Jasa (Kumulatif)
+                      const jumlahSetoran = (ang.bayarPokok || 0) + (ang.bayarJasa || 0);
                       runningJasaPaid += (ang.bayarJasa || 0);
-                      const targetJasaBulanan = Math.round(kartuPinjamanModal.jumlahPinjaman * (kartuPinjamanModal.bungaPersen / 100));
-                      const cumulativeTargetJasa = targetJasaBulanan * (idx + 1); 
-                      const tunggakanRow = cumulativeTargetJasa - runningJasaPaid; // Jika minus, berarti bayar lebih
+                      
+                      // Hitung selisih bulan dari tanggal pencairan dan tanggal bayar baris ini
+                      const tglBayar = new Date(ang.tglBayar);
+                      let blnDiff = (tglBayar.getFullYear() - tglPencairan.getFullYear()) * 12 + (tglBayar.getMonth() - tglPencairan.getMonth());
+                      
+                      // Jika bayarnya mendahului tanggal pencairan di bulan tersebut, kurangi 1
+                      if (tglBayar.getDate() < tglPencairan.getDate()) {
+                        blnDiff -= 1;
+                      }
+                      
+                      let bulanTarget = Math.max(1, blnDiff); // Minimal menarget 1 bulan
+                      bulanTarget = Math.min(bulanTarget, kartuPinjamanModal.tenorBulan);
+                      
+                      const cumulativeTargetJasa = targetJasaBulanan * bulanTarget; 
+                      const tunggakanRow = cumulativeTargetJasa - runningJasaPaid; 
 
                       return (
                         <tr key={ang.id} className="border-b border-slate-400 hover:bg-sky-50/50">
